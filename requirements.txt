@@ -1,0 +1,7 @@
+matplotlib
+pyspark
+requests
+setuptools
+streamlit
+
+git+https://github.com/ninja-con-gafas/finance.git
