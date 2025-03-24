@@ -60,6 +60,13 @@ class PortfolioAnalyzer:
 
         Returns:
             DataFrame: A Spark DataFrame containing the daily portfolio valuation.
+
+        Schema:
+            root
+            |-- timestamp: date (nullable = true)
+            |-- *symbol: double (nullable = true)
+
+            *symbol represents all the column for each stock symbol.
         """
 
         logger.info("Calculating holdings")
@@ -95,6 +102,13 @@ class PortfolioAnalyzer:
         
         Returns:
             DataFrame: A DataFrame containing market quotes per day.
+
+        Schema:
+            root
+            |-- timestamp: date (nullable = true)
+            |-- *symbol_quote: double (nullable = true)
+
+            *symbol_quote represents all the column for each stock symbol.
         """
 
         logger.info("Compiling quotes")
@@ -112,6 +126,13 @@ class PortfolioAnalyzer:
         
         Returns:
             DataFrame: A Spark DataFrame containing daily trade activity.
+
+        Schema:
+            root
+            |-- timestamp: date (nullable = true)
+            |-- *symbol_quantity: long (nullable = true)
+
+            *symbol_quantity represents all the column for each stock symbol.
         """
 
         logger.info("Compiling trades")
@@ -154,6 +175,10 @@ class PortfolioAnalyzer:
         
         Returns:
             DataFrame: A DataFrame containing unique trading dates.
+
+        Schema:
+            root
+            |-- timestamp: string (nullable = true)
         """
 
         logger.info("Extracting market days")
@@ -267,6 +292,18 @@ class PortfolioAnalyzer:
         logger.info("Getting tradebook")
         return self.tradebook
     
+    def get_tradebook_as_pandas_dataframe(self) -> pandas_DataFrame:
+
+        """
+        Converts Spark DataFrame tradebook to a Pandas DataFrame.
+        
+        Returns:
+            pandas_DataFrame: Tradebook data in Pandas format.
+        """
+
+        logger.info("Converting tradebook to Pandas DataFrame")
+        return self.tradebook.toPandas()
+    
     def get_trades(self) -> DataFrame:
 
         """
@@ -286,6 +323,13 @@ class PortfolioAnalyzer:
         
         Returns:
             DataFrame: A Spark DataFrame containing cleaned trade data.
+
+        Schema:
+            root
+            |-- trade_date: date (nullable = true)
+            |-- symbol: string (nullable = true)
+            |-- average_price: double (nullable = true)
+            |-- quantity: long (nullable = true)
         """
 
         logger.info("Loading tradebook")

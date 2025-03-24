@@ -1,4 +1,5 @@
 import logging
+from pages.ui_components import set_sidebar
 from streamlit import file_uploader, selectbox, session_state, set_page_config, success, switch_page, title
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 from tempfile import NamedTemporaryFile
@@ -9,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configure the Streamlit page
-set_page_config(page_title="Portfolio Analyzer", layout="wide")
+set_page_config(page_title="Home", layout="wide")
 
 # List of supported brokers and file formats
 LIST_OF_SUPPORTED_BROKERS = ["Zerodha"]
@@ -32,22 +33,22 @@ def get_tradebook_path() -> None:
         session_state["tradebook_path"] = tmp_file.name
         logger.info(f"Tradebook saved to temporary file: {tmp_file.name}")
 
-def main():
+def main() -> None:
 
     """
-    Streamlit app entry point that allows users to upload their tradebook and 
-    select a stock broker for portfolio analysis.
+    Streamlit entry point for Home page.
     
     - Displays a title and broker selection dropdown.
     - Allows users to upload a tradebook file.
     - Saves the uploaded file path and broker selection in session state.
-    - Redirects to the dashboard after a short delay.
+    - Redirects to the Holdings page after a short delay.
     """
 
-    logger.info("Starting Portfolio Analyzer.")
     title("📊 Analyze Your Portfolio")
+    set_sidebar()
+    logger.info("Home page loaded.")
     
-    broker: str = selectbox("Select Stock Broker", LIST_OF_SUPPORTED_BROKERS, index=0)
+    broker: str = selectbox("Select Stock Broker", LIST_OF_SUPPORTED_BROKERS)
     logger.info(f"Selected broker: {broker}")
     
     uploaded_file = file_uploader("Upload Tradebook", type=LIST_OF_SUPPORTED_FILE_FORMATS)
@@ -58,14 +59,13 @@ def main():
 
         session_state["uploaded_file"] = uploaded_file
         session_state["broker"] = broker
-        session_state["cached_holdings_chart"] = None  # Reset cached chart
 
         get_tradebook_path()
 
-        logger.info("Redirecting to the dashboard.")
-        sleep(1)  # Short delay before redirecting to the dashboard
+        logger.info("Redirecting to the Holdings.")
+        sleep(1)  # Short delay before redirecting to the Holdings
 
-        switch_page("pages/Dashboards.py")
+        switch_page("pages/Holdings.py")
 
 if __name__ == "__main__":
     main()
