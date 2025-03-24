@@ -15,23 +15,22 @@ set_page_config(page_title="Portfolio Analyzer", layout="wide")
 LIST_OF_SUPPORTED_BROKERS = ["Zerodha"]
 LIST_OF_SUPPORTED_FILE_FORMATS = ["csv"]
 
-def get_tradebook_path(uploaded_file: UploadedFile) -> str:
+def get_tradebook_path() -> None:
     
     """
-    Save the uploaded tradebook file to a temporary location and return its path.
+    Save the uploaded tradebook file to a temporary location and store the path in session state.
 
-    Args:
-        uploaded_file (UploadedFile): The uploaded file object from Streamlit.
-
-    Returns:
-        str: The file path of the temporarily stored tradebook.
+    Raises:
+        ValueError: If no file is uploaded before calling this function.
     """
+
+    uploaded_file: UploadedFile = session_state["uploaded_file"]
 
     logger.info("Saving uploaded tradebook to a temporary file.")
     with NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
         tmp_file.write(uploaded_file.getbuffer())
+        session_state["tradebook_path"] = tmp_file.name
         logger.info(f"Tradebook saved to temporary file: {tmp_file.name}")
-        return tmp_file.name
 
 def main():
 
@@ -51,19 +50,21 @@ def main():
     broker: str = selectbox("Select Stock Broker", LIST_OF_SUPPORTED_BROKERS, index=0)
     logger.info(f"Selected broker: {broker}")
     
-    uploaded_file: UploadedFile = file_uploader("Upload Tradebook", type=LIST_OF_SUPPORTED_FILE_FORMATS)
+    uploaded_file = file_uploader("Upload Tradebook", type=LIST_OF_SUPPORTED_FILE_FORMATS)
+    
+    if uploaded_file:
+        logger.info(f"File {uploaded_file.name} uploaded successfully.")
+        success(f"✅ File {uploaded_file.name} uploaded successfully!")
 
-    if uploaded_file is not None:
-        logger.info(f"File '{uploaded_file.name}' uploaded successfully.")
-        success(f"✅ File '{uploaded_file.name}' uploaded successfully...!")
-        
-        session_state["tradebook_path"] = get_tradebook_path(uploaded_file)
+        session_state["uploaded_file"] = uploaded_file
         session_state["broker"] = broker
-        session_state["cached_holdings_chart"] = None
-        
+        session_state["cached_holdings_chart"] = None  # Reset cached chart
+
+        get_tradebook_path()
+
         logger.info("Redirecting to the dashboard.")
-        sleep(1)  # Sleep for 1 second before redirecting to the dashboard
-        
+        sleep(1)  # Short delay before redirecting to the dashboard
+
         switch_page("pages/Dashboards.py")
 
 if __name__ == "__main__":

@@ -11,21 +11,17 @@ logger = logging.getLogger(__name__)
 # Configure the Streamlit page
 set_page_config(page_title="Dashboards", layout="wide")
 
-def get_melted_holdings() -> DataFrame:
+def get_holdings() -> None:
 
     """
-    Retrieve and transform holdings data into a long-format DataFrame 
-    for visualization.
-
-    - Checks if a tradebook has been uploaded.
-    - Loads and processes tradebook data using PortfolioAnalyzer.
-    - Melts the holdings data to make it suitable for Altair visualization.
-
-    Returns:
-        DataFrame: A long-format DataFrame with columns: Date, Security, Valuation.
-
+    Creates holdings data by retrieving and processesing tradebook data for portfolio analysis.
+    
+    - Checks if tradebook path is available in session state.
+    - Processes tradebook using PortfolioAnalyzer.
+    - Stores holdings data as a pandas DataFrame in session state.
+    
     Raises:
-        Exception: If an error occurs while processing the tradebook.
+        RuntimeError: If tradebook is missing in session state.
     """
 
     if "tradebook_path" not in session_state:
@@ -37,76 +33,89 @@ def get_melted_holdings() -> DataFrame:
     tradebook_path: str = session_state["tradebook_path"]
     logger.info(f"Processing tradebook for broker: {broker}, path: {tradebook_path}")
 
-    try:
-        analyzer: PortfolioAnalyzer = PortfolioAnalyzer(broker=broker, tradebook_path=tradebook_path)
-        logger.info("PortfolioAnalyzer initialized successfully.")
-        
-        return (analyzer.get_holdings_as_pandas_dataframe()
-                .rename(columns={"timestamp": "Date"})
-                .assign(Date=lambda df: df["Date"].astype(str))
-                .melt(id_vars=["Date"], var_name="Security", value_name="Valuation"))
+    analyzer = PortfolioAnalyzer(broker=broker, tradebook_path=tradebook_path)
+    session_state["holdings"] = analyzer.get_holdings_as_pandas_dataframe()
 
+def get_melted_holdings() -> None:
+
+    """
+    Transforms holdings data into a long-format DataFrame for visualization.
+
+    - Renames `timestamp` to `Date` and converts it to string.
+    - Melts the holdings DataFrame to have columns: Date, Security, Valuation.
+    
+    Raises:
+        Exception: If an error occurs during transformation.
+    """
+
+    try:
+        if "holdings" not in session_state:
+            logger.error("Holdings data not found in session state.")
+            error("Holdings data not available.")
+            stop()
+        
+        session_state["melted_holdings"] = (session_state["holdings"]
+                                            .rename(columns={"timestamp": "Date"})
+                                            .assign(Date=lambda df: df["Date"].astype(str))
+                                            .melt(id_vars=["Date"], var_name="Security", value_name="Valuation"))
     except Exception as e:
-        logger.error(f"An error occurred while processing the tradebook: {e}")
+        logger.error(f"Error transforming holdings data: {e}")
         error(f"An error occurred while processing the tradebook: {e}")
         stop()
 
-def get_holdings_chart(holdings_melted: DataFrame) -> Chart:
+def get_holdings_chart() -> None:
 
     """
-    Create an interactive Altair line chart to visualize portfolio holdings over time.
+    Creates an interactive Altair line chart to visualize portfolio holdings over time.
 
-    - Uses a selection filter for highlighting securities.
+    - Uses selection filtering for highlighting securities.
     - Displays valuation trends over time.
     - Enables tooltip interactivity.
-
-    Args:
-        holdings_melted (DataFrame): A long-format DataFrame containing holdings data.
-
-    Returns:
-        Chart: An Altair chart object for visualization.
     """
+
+    if "melted_holdings" not in session_state:
+        logger.error("Melted holdings data not found in session state.")
+        error("Chart data unavailable.")
+        stop()
 
     logger.info("Creating holdings chart.")
     selection = selection_point(fields=["Security"], bind="legend")
 
-    return (Chart(holdings_melted, width="container", height=700, title="Portfolio Holdings Over Time")
-            .mark_line()
-            .encode(x="Date:N",
-                    y="Valuation:Q",
-                    color="Security:N",
-                    tooltip=["Date", "Security", "Valuation"],
-                    opacity=condition(selection, value(1), value(0.1)))
-            .add_params(selection)
-            .interactive())
+    session_state["holdings_chart"] = (Chart(session_state["melted_holdings"], 
+                                             width="container", 
+                                             height=700, 
+                                             title="Portfolio Holdings Over Time")
+                                       .mark_line()
+                                       .encode(x="Date:N",
+                                               y="Valuation:Q",
+                                               color="Security:N",
+                                               tooltip=["Date", "Security", "Valuation"],
+                                               opacity=condition(selection, value(1), value(0.1)))
+                                       .add_params(selection)
+                                       .interactive())
 
-def main():
+def main() -> None:
 
     """
     Streamlit entry point for Dashboards.
 
-    - Displays a title and checks for cached chart data.
-    - Loads holdings data and generates an Altair chart.
-    - Caches the chart to optimize performance.
+    - Displays a title.
+    - Loads and processes tradebook data if not already cached.
+    - Generates and displays an Altair chart.
     """
 
     title("📈 Dashboards")
     logger.info("Dashboards page loaded.")
-
-    if "cached_holdings_chart" in session_state and session_state["cached_holdings_chart"] is not None:
-        logger.info("Using cached holdings chart.")
-        altair_chart(session_state["cached_holdings_chart"], use_container_width=True)
-        return
-
-    with spinner("🔄 Processing tradebook... Please wait."):
-        holdings_melted: DataFrame = get_melted_holdings()
     
-    success("✅ Holdings data processed successfully!")
-    logger.info("Holdings data processed successfully.")
-
-    holdings_chart: Chart = get_holdings_chart(holdings_melted)
-    session_state["cached_holdings_chart"] = holdings_chart
-    altair_chart(holdings_chart, use_container_width=True)
+    if "holdings_chart" not in session_state:
+        with spinner("🔄 Processing tradebook... Please wait."):
+            get_holdings()
+            success("✅ Holdings data processed successfully!")
+            get_melted_holdings()
+            get_holdings_chart()
+    
+    logger.info("Displaying holdings chart.")
+    altair_chart(session_state["holdings_chart"], use_container_width=True)
     logger.info("Chart displayed successfully.")
 
 if __name__ == "__main__":
