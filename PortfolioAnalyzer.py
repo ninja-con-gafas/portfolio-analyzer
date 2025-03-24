@@ -1,9 +1,14 @@
+import logging
 from datetime import date, timedelta
 from finance.securities import get_historical_data
 from pandas import DataFrame as pandas_DataFrame
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql.functions import col, date_format, first, lit, round, sum as spark_sum, to_date, to_timestamp, when
 from typing import Dict, List, Tuple
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class PortfolioAnalyzer:
 
@@ -34,6 +39,7 @@ class PortfolioAnalyzer:
             tradebook_path (str): Path to the tradebook CSV file.
         """
 
+        logger.info("Initializing PortfolioAnalyzer")
         self.spark: SparkSession = SparkSession.builder.appName("portfolio-analyzer").getOrCreate()
         self.tradebook_path: str = tradebook_path
         self.broker: str = broker
@@ -45,6 +51,7 @@ class PortfolioAnalyzer:
         self.quotes: DataFrame = self.compile_quotes()
         self.trades: DataFrame = self.compile_trades()
         self.holdings: DataFrame = self.calculate_holdings()
+        logger.info("PortfolioAnalyzer initialized successfully")
 
     def calculate_holdings(self) -> DataFrame:
 
@@ -55,6 +62,7 @@ class PortfolioAnalyzer:
             DataFrame: A Spark DataFrame containing the daily portfolio valuation.
         """
 
+        logger.info("Calculating holdings")
         quantity_columns = [f"{symbol}_quantity" for symbol in self.symbols]
         quote_columns = [f"{symbol}_quote" for symbol in self.symbols]
         window = Window.orderBy("timestamp").rowsBetween(Window.unboundedPreceding, Window.currentRow)
@@ -76,6 +84,7 @@ class PortfolioAnalyzer:
             Tuple[date, date]: The first and last trade dates plus one day for end.
         """
 
+        logger.info("Calculating tenure")
         return (self.tradebook.agg({"trade_date": "min"}).collect()[0][0], 
                 self.tradebook.agg({"trade_date": "max"}).collect()[0][0] + timedelta(days=1))
     
@@ -88,8 +97,10 @@ class PortfolioAnalyzer:
             DataFrame: A DataFrame containing market quotes per day.
         """
 
+        logger.info("Compiling quotes")
         quotes = self.dates
         for ticker, data in self.historical_data.items():
+            logger.info(f"Compiling quotes for {ticker}")
             quotes = (quotes.join(data.withColumnRenamed("quote", f"{ticker}_quote"), on="timestamp", how="inner")
                       .drop("symbol"))
         return quotes.withColumn("timestamp", to_date(col("timestamp")))
@@ -103,6 +114,7 @@ class PortfolioAnalyzer:
             DataFrame: A Spark DataFrame containing daily trade activity.
         """
 
+        logger.info("Compiling trades")
         return (self.tradebook.groupBy("trade_date")
                 .pivot("symbol")
                 .agg(first("quantity"))
@@ -122,8 +134,10 @@ class PortfolioAnalyzer:
             Dict[str, DataFrame]: A dictionary mapping stock symbols to historical price data.
         """
 
+        logger.info("Downloading historical data")
         historical_data = {}
         for symbol in self.symbols:
+            logger.info(f"Downloading historical data for {symbol}")
             historical_data[symbol] = (self.spark.createDataFrame(get_historical_data(ticker=f"{symbol}.NS", start_date=str(self.tenure[0]), 
                                                                                       end_date=str(self.tenure[1]),
                                                                                       frequency="1d", quote_type="adjclose"))
@@ -142,6 +156,7 @@ class PortfolioAnalyzer:
             DataFrame: A DataFrame containing unique trading dates.
         """
 
+        logger.info("Extracting market days")
         return list(self.historical_data.values())[0].select("timestamp")
 
     def extract_symbols(self) -> List[str]:
@@ -153,6 +168,7 @@ class PortfolioAnalyzer:
             List[str]: A list of stock symbols present in the tradebook.
         """
 
+        logger.info("Extracting symbols")
         return [row["symbol"] for row in self.tradebook.select("symbol").distinct().collect()]
     
     def get_dates(self) -> DataFrame:
@@ -164,9 +180,10 @@ class PortfolioAnalyzer:
             DataFrame: A DataFrame with market trading dates.
         """
 
+        logger.info("Getting dates")
         return self.dates
 
-    def get_historical_data(self) -> DataFrame:
+    def get_historical_data(self) -> Dict[str, DataFrame]:
 
         """
         Get the historical stock price data for all tracked symbols.
@@ -175,6 +192,7 @@ class PortfolioAnalyzer:
             Dict[str, DataFrame]: A dictionary mapping stock symbols to their historical price DataFrames.
         """
 
+        logger.info("Getting historical data")
         return self.historical_data
     
     def get_holdings(self) -> DataFrame:
@@ -186,6 +204,7 @@ class PortfolioAnalyzer:
             DataFrame: A DataFrame representing the portfolio holdings for each symbol over time.
         """
 
+        logger.info("Getting holdings")
         return self.holdings
     
     def get_holdings_as_pandas_dataframe(self) -> pandas_DataFrame:
@@ -197,6 +216,7 @@ class PortfolioAnalyzer:
             pandas_DataFrame: Holdings data in Pandas format.
         """
 
+        logger.info("Converting holdings to Pandas DataFrame")
         return self.holdings.toPandas()
     
     def get_quotes(self) -> DataFrame:
@@ -208,6 +228,7 @@ class PortfolioAnalyzer:
             DataFrame: A DataFrame containing stock prices for all symbols over time.
         """
 
+        logger.info("Getting quotes")
         return self.quotes
     
     def get_symbols(self) -> List[str]:
@@ -219,6 +240,7 @@ class PortfolioAnalyzer:
             List[str]: A list of stock symbols in the portfolio.
         """
         
+        logger.info("Getting symbols")
         return self.symbols
     
     def get_tenure(self) -> Tuple:
@@ -230,6 +252,7 @@ class PortfolioAnalyzer:
             Tuple[date, date]: The start and end date of portfolio activity.
         """
 
+        logger.info("Getting tenure")
         return self.tenure
     
     def get_tradebook(self) -> DataFrame:
@@ -241,6 +264,7 @@ class PortfolioAnalyzer:
             DataFrame: A Spark DataFrame representing the tradebook.
         """
 
+        logger.info("Getting tradebook")
         return self.tradebook
     
     def get_trades(self) -> DataFrame:
@@ -252,6 +276,7 @@ class PortfolioAnalyzer:
             DataFrame: A DataFrame with processed trade transactions per market day.
         """
 
+        logger.info("Getting trades")
         return self.trades
 
     def load_tradebook(self) -> DataFrame:
@@ -263,6 +288,7 @@ class PortfolioAnalyzer:
             DataFrame: A Spark DataFrame containing cleaned trade data.
         """
 
+        logger.info("Loading tradebook")
         if self.broker == "Zerodha":
             return (self.spark.read.csv(self.tradebook_path, inferSchema=True, header=True)
                 .drop("isin", "exchange", "segment", "series", "auction", "trade_id", "order_id", "order_execution_time")

@@ -1,7 +1,12 @@
+import logging
 from streamlit import file_uploader, selectbox, session_state, set_page_config, success, switch_page, title
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 from tempfile import NamedTemporaryFile
 from time import sleep
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Configure the Streamlit page
 set_page_config(page_title="Portfolio Analyzer", layout="wide")
@@ -22,8 +27,10 @@ def get_tradebook_path(uploaded_file: UploadedFile) -> str:
         str: The file path of the temporarily stored tradebook.
     """
 
+    logger.info("Saving uploaded tradebook to a temporary file.")
     with NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
         tmp_file.write(uploaded_file.getbuffer())
+        logger.info(f"Tradebook saved to temporary file: {tmp_file.name}")
         return tmp_file.name
 
 def main():
@@ -38,18 +45,23 @@ def main():
     - Redirects to the dashboard after a short delay.
     """
 
+    logger.info("Starting Portfolio Analyzer.")
     title("📊 Analyze Your Portfolio")
     
     broker: str = selectbox("Select Stock Broker", LIST_OF_SUPPORTED_BROKERS, index=0)
+    logger.info(f"Selected broker: {broker}")
+    
     uploaded_file: UploadedFile = file_uploader("Upload Tradebook", type=LIST_OF_SUPPORTED_FILE_FORMATS)
 
     if uploaded_file is not None:
+        logger.info(f"File '{uploaded_file.name}' uploaded successfully.")
         success(f"✅ File '{uploaded_file.name}' uploaded successfully...!")
         
         session_state["tradebook_path"] = get_tradebook_path(uploaded_file)
         session_state["broker"] = broker
         session_state["cached_holdings_chart"] = None
         
+        logger.info("Redirecting to the dashboard.")
         sleep(1)  # Sleep for 1 second before redirecting to the dashboard
         
         switch_page("pages/Dashboards.py")
