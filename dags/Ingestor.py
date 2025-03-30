@@ -8,8 +8,9 @@ from airflow import DAG
 from airflow.hooks.base import BaseHook
 from airflow.models.baseoperator import chain
 from airflow.operators.python import PythonOperator
-from datetime import datetime, timezone
+from datetime import datetime
 from psycopg2 import connect, DatabaseError
+from tempfile import gettempdir
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -74,7 +75,7 @@ def fetch_and_save(segment: str, **kwargs) -> None:
     logger.info(f"Fetching securities for segment: {segment}")
     securities = get_securities(segment=segment)
     path: str = get_securities_file_path()
-    csv_file = f"{path}/{sanitize_segment(segment)}_securities.csv"
+    csv_file = os.path.join(path, f"{sanitize_segment(segment)}_securities.csv")
     logger.info(f"Saving securities data to {csv_file}")
     save_securities_to_csv(securities=securities, segment=segment, csv_file=csv_file)
 
@@ -87,9 +88,9 @@ def get_securities_file_path() -> str:
         str: The path to the directory.
     """
 
-    directory = "/tmp/portfolio-analyzer"
-    os.makedirs(name=directory, exist_ok=True)
-    return directory
+    temporary_directory = os.path.join(gettempdir(), "portfolio-analyzer")
+    os.makedirs(temporary_directory, exist_ok=True)
+    return temporary_directory
 
 def get_database_configurations() -> Dict[str, str]:
 
@@ -457,11 +458,10 @@ for segment in segments.keys():
         dag=dag,
     )
     
-    path: str = get_securities_file_path()
     ingest = PythonOperator(
         task_id=f"ingest_{sanitize_segment(segment)}",
         python_callable=ingest_securities,
-        op_kwargs={"csv_file": f"{path}/{sanitize_segment(segment)}_securities.csv"},
+        op_kwargs={"csv_file": os.path.join(get_securities_file_path(), f"{sanitize_segment(segment)}_securities.csv")},
         provide_context=True,
         dag=dag,
     )

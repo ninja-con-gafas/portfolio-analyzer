@@ -1,8 +1,9 @@
 import logging
+import os
 from pages.ui_components import set_sidebar
 from streamlit import file_uploader, selectbox, session_state, set_page_config, success, switch_page, title
 from streamlit.runtime.uploaded_file_manager import UploadedFile
-from tempfile import NamedTemporaryFile
+from tempfile import gettempdir, NamedTemporaryFile
 from time import sleep
 
 # Configure logging
@@ -28,10 +29,12 @@ def get_tradebook_path() -> None:
     uploaded_file: UploadedFile = session_state["uploaded_file"]
 
     logger.info("Saving uploaded tradebook to a temporary file.")
-    with NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
-        tmp_file.write(uploaded_file.getbuffer())
-        session_state["tradebook_path"] = tmp_file.name
-        logger.info(f"Tradebook saved to temporary file: {tmp_file.name}")
+    temporary_directory = os.path.join(gettempdir(), "portfolio-analyzer")
+    os.makedirs(temporary_directory, exist_ok=True)
+    with NamedTemporaryFile(dir=temporary_directory, delete=False, suffix=".csv") as temporary_file:
+        temporary_file.write(uploaded_file.getbuffer())
+        session_state["tradebook_path"] = temporary_file.name
+        logger.info(f"Tradebook saved to temporary file: {temporary_file.name}")
 
 def main() -> None:
 
