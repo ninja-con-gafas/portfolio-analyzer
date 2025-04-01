@@ -1,5 +1,6 @@
 matplotlib
 pandas
+psycopg2-binary
 pyspark
 requests
 scipy
