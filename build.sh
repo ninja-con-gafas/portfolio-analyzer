@@ -85,8 +85,6 @@ echo "Exiting to trigger restart via restart policy."
 exit 0
 EOF
 
-chmod +x "$AIRFLOW_ENTRYPOINT_SCRIPT_PATH"
-
 echo_success "Creating Portfolio Analyzer Dockerfile"
 cat <<EOF > "$PORTFOLIO_ANALYZER_DOCKERFILE"
 FROM python:3.12-slim
@@ -222,7 +220,11 @@ services:
       - airflow-webserver
       - postgres
     environment:
-      - STREAMLIT_CONFIG_DIR=/$PORTFOLIO_ANALYZER_APPLICATION_PATH/.streamlit
+      POSTGRES_HOST: postgres
+      POSTGRES_PORTFOLIOANALYZER_DATABASE: $POSTGRES_PORTFOLIOANALYZER_DATABASE
+      POSTGRES_PORTFOLIOANALYZER_PASSWORD: $POSTGRES_PORTFOLIOANALYZER_PASSWORD
+      POSTGRES_PORTFOLIOANALYZER_USERNAME: $POSTGRES_PORTFOLIOANALYZER_USERNAME
+      STREAMLIT_CONFIG_DIR: "/$PORTFOLIO_ANALYZER_APPLICATION_PATH/.streamlit"
     ports:
       - "8501:8501"
     networks:
