@@ -1,7 +1,10 @@
 import logging
 import os
-from pages.ui_components import set_sidebar
-from streamlit import file_uploader, selectbox, session_state, set_page_config, success, switch_page, title
+from config.global_variables import (LIST_OF_SUPPORTED_BROKERS, LIST_OF_SUPPORTED_TRADEBOOK_FILE_FORMATS, NSE_SEGMENTS_AND_SERIES, 
+                                     NSE_SEGMENTS_AND_SERIES_INFO_TEXT)
+from config.ui_components import set_sidebar
+from pyspark.sql import SparkSession
+from streamlit import file_uploader, selectbox, session_state, set_page_config, spinner, success, switch_page, title
 from streamlit.runtime.uploaded_file_manager import UploadedFile
 from tempfile import gettempdir, NamedTemporaryFile
 from time import sleep
@@ -13,10 +16,6 @@ logger = logging.getLogger(__name__)
 # Configure the Streamlit page
 set_page_config(page_title="Home", layout="wide")
 
-# List of supported brokers and file formats
-LIST_OF_SUPPORTED_BROKERS = ["Zerodha"]
-LIST_OF_SUPPORTED_FILE_FORMATS = ["csv"]
-
 def get_tradebook_path() -> None:
     
     """
@@ -27,7 +26,6 @@ def get_tradebook_path() -> None:
     """
 
     uploaded_file: UploadedFile = session_state["uploaded_file"]
-
     logger.info("Saving uploaded tradebook to a temporary file.")
     temporary_directory = os.path.join(gettempdir(), "portfolio-analyzer")
     os.makedirs(temporary_directory, exist_ok=True)
@@ -50,19 +48,29 @@ def main() -> None:
     title("📊 Analyze Your Portfolio")
     set_sidebar()
     logger.info("Home page loaded.")
-    
-    broker: str = selectbox("Select Stock Broker", LIST_OF_SUPPORTED_BROKERS)
-    logger.info(f"Selected broker: {broker}")
-    
-    uploaded_file = file_uploader("Upload Tradebook", type=LIST_OF_SUPPORTED_FILE_FORMATS)
-    
-    if uploaded_file:
-        logger.info(f"File {uploaded_file.name} uploaded successfully.")
-        success(f"✅ File {uploaded_file.name} uploaded successfully!")
 
-        session_state["uploaded_file"] = uploaded_file
-        session_state["broker"] = broker
+    logger.info("Initializing Apache Spark Session for `portfolio-analyzer`")
+    with spinner("🔄Initializing Apache Spark Session. Please wait."):
+        session_state["spark"] = (SparkSession.builder
+                                .appName("portfolio-analyzer")
+                                .config("spark.jars.packages", "org.postgresql:postgresql:42.6.0")
+                                .getOrCreate())
+    
+    session_state["broker"] = selectbox("Select Stock Broker", LIST_OF_SUPPORTED_BROKERS)
+    logger.info(f"Selected broker: {session_state["broker"]}")
+    
+    session_state["segment"] = selectbox("Select Segment", 
+                                         options=list(NSE_SEGMENTS_AND_SERIES.keys()),
+                                         format_func=lambda key: f"{key} ({', '.join(NSE_SEGMENTS_AND_SERIES[key])})",
+                                         help=NSE_SEGMENTS_AND_SERIES_INFO_TEXT)
+    logger.info(f"Selected segment: {session_state["segment"]},  corresponding series: {NSE_SEGMENTS_AND_SERIES.get(session_state["segment"])}")
 
+    session_state["uploaded_file"] = file_uploader("Upload Tradebook", type=LIST_OF_SUPPORTED_TRADEBOOK_FILE_FORMATS)
+    
+    if session_state["uploaded_file"]:
+        logger.info(f"File {session_state["uploaded_file"].name} uploaded successfully.")
+        success(f"✅ File {session_state["uploaded_file"].name} uploaded successfully!")
+        
         get_tradebook_path()
 
         logger.info("Redirecting to the Holdings.")

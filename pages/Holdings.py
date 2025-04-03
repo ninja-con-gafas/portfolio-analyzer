@@ -1,7 +1,7 @@
 import logging
 from altair import Chart, condition, selection_point, value
-from pages.ui_components import set_sidebar
-from analysis.PortfolioAnalyzer import PortfolioAnalyzer
+from config.ui_components import set_sidebar
+from process.Equity import Equity
 from streamlit import altair_chart, error, session_state, set_page_config, spinner, stop, success, title
 
 # Configure logging
@@ -29,13 +29,12 @@ def get_holdings() -> None:
         error("No tradebook found. Please upload a file first.")
         stop()
 
-    broker: str = session_state["broker"]
-    tradebook_path: str = session_state["tradebook_path"]
-    logger.info(f"Processing tradebook for broker: {broker}, path: {tradebook_path}")
+    logger.info(f"Processing tradebook for broker: {session_state["broker"]}, segment: {session_state["segment"]}, path: {session_state["tradebook_path"]}")
 
-    analyzer = PortfolioAnalyzer(broker=broker, tradebook_path=tradebook_path)
-    session_state["tradebook"] = analyzer.get_tradebook_as_pandas_dataframe()
-    session_state["holdings"] = analyzer.get_holdings_as_pandas_dataframe()
+    analyzer = Equity(spark=session_state["spark"], broker=session_state["broker"], segment=session_state["segment"],
+                      tradebook_path=session_state["tradebook_path"])
+    session_state["tradebook"] = analyzer.get_tradebook().toPandas()
+    session_state["holdings"] = analyzer.get_holdings().toPandas()
 
 def get_holdings_chart() -> None:
 
@@ -168,7 +167,7 @@ def main() -> None:
     logger.info("Holdings page loaded.")
     
     if "holdings_chart" not in session_state or "valuation_chart" not in session_state or "latest_holdings_pie_chart" not in session_state:
-        with spinner("🔄 Processing tradebook... Please wait."):
+        with spinner("🔄 Processing tradebook. Please wait."):
             get_holdings()
             success("✅ Holdings data processed successfully!")
             get_melted_holdings()

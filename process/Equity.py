@@ -1,32 +1,31 @@
 import logging
-import os
+from process.BSE import get_script_codes
+from config.database import get_database_properties_securities, get_jdbc_postgresql_url
+from config.global_variables import NSE_SEGMENTS_AND_SERIES
 from datetime import date, datetime, timedelta
 from finance.securities import get_corporate_events, get_historical_data
-from pandas import DataFrame as pandas_DataFrame
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql.functions import col, date_format, first, lit, min, round, sum as spark_sum, to_date, to_timestamp, when
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Tuple
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class PortfolioAnalyzer:
+class Equity:
 
     """
-    PortfolioAnalyzer processes and analyzes a stock portfolio based on trade records, corporate actions, and historical 
-    prices to calculate portfolio holdings over time.
+    Performs time series analysis on an equity portfolio using trade records, corporate actions, and historical prices.
 
     Attributes:
         spark (SparkSession): Spark session instance.
         tradebook_path (str): Path to the tradebook CSV file.
         broker (str): Name of the broker (e.g., Zerodha).
+        series  (str): The series corresponding to the segment of the security.
         tradebook (DataFrame): Processed and adjusted trade data.
         symbols (List[str]): Unique stock symbols present in the portfolio.
         tenure (Tuple[date, date]): Start and end dates of portfolio activity.
         earliest_trade_dates (Dict[str, datetime]): First recorded trade date for each stock.
         historical_data (Dict[str, DataFrame]): Historical price data for stocks in the portfolio.
-        jdbc_postgresql_url (str): JDBC URL for connecting to the PostgreSQL database.
-        database_properties_securities (Dict[str, str]): Connection properties for the `securities` database.
         corporate_events (Dict[str, DataFrame]): Corporate actions impacting stock quantity (stock splits and bonuses).
         dates (DataFrame): Market trading dates relevant to the portfolio.
         quotes (DataFrame): Aggregated historical stock prices.
@@ -34,31 +33,29 @@ class PortfolioAnalyzer:
         holdings (DataFrame): Portfolio holdings over time, adjusted for corporate actions.
     """
     
-    def __init__(self, broker: str, tradebook_path: str):
+    def __init__(self, spark: SparkSession, broker: str, segment: str, tradebook_path: str):
 
         """
         Initializes the PortfolioAnalyzer with tradebook data and market history.
 
-        Args:
+        Parameters:
+            spark (SparkSession): Spark session instance.
             broker (str): The name of the broker.
+            segment (str): The segment of the security.
             tradebook_path (str): Path to the tradebook CSV file.
         """
 
         logger.info("Initializing PortfolioAnalyzer")
-        self.spark = (SparkSession.builder
-                      .appName("portfolio-analyzer")
-                      .config("spark.jars.packages", "org.postgresql:postgresql:42.6.0")
-                      .getOrCreate())
+        self.spark = spark
         self.tradebook_path: str = tradebook_path
         self.broker: str = broker
+        self.series: tuple = NSE_SEGMENTS_AND_SERIES.get(segment)
         self.tradebook: DataFrame = self.load_tradebook()
         self.symbols: List[str] = self.extract_symbols()
         self.tenure: Tuple[date, date] = self.calculate_tenure()
-        self.earliest_trade_dates: Dict[str, datetime] = self.fetch_earliest_trade_dates()
+        self.earliest_trade_dates: Dict[str, datetime] = self.extract_earliest_trade_dates()
         self.historical_data: Dict[str, DataFrame] = self.download_historical_data()
-        self.jdbc_postgresql_url: str = self.get_jdbc_postgresql_url()
-        self.database_properties_securities :Dict[str, str] = self.get_database_properties_securities()
-        self.corporate_events: Dict[str, DataFrame] = self.get_corporate_events()
+        self.corporate_events: Dict[str, DataFrame] = self.fetch_corporate_events()
         self.tradebook: DataFrame = self.adjust_tradebook_for_corporate_actions()
         self.dates: DataFrame = self.extract_market_days()
         self.quotes: DataFrame = self.compile_quotes()
@@ -75,7 +72,7 @@ class PortfolioAnalyzer:
             DataFrame: Adjusted tradebook DataFrame.
         """
 
-        logger.info("Taking into account corporate events")
+        logger.info("Taking into account stock splits and bonuses")
         consolidated_corporate_events = None
         for symbol, events in self.corporate_events.items():
             events = (events.withColumn("ex_date", to_date(col("ex_date"), "dd MMM yyyy"))
@@ -210,6 +207,22 @@ class PortfolioAnalyzer:
                                        .withColumn("symbol", lit(symbol)))
         return historical_data
     
+    def extract_earliest_trade_dates(self) -> Dict[str, datetime]:
+
+        """
+        Fetch the earliest trade date for each stock symbol from the tradebook.
+
+        Returns:
+            Dict[str, datetime]: A dictionary mapping each stock symbol to its earliest trade date.
+        """
+
+        logger.info("Fetching the earliest trade date for each stock symbol")
+        return {row["symbol"]: row["start_date"] for row in 
+                ((self.tradebook.groupBy("symbol")
+                  .agg(min("trade_date")
+                       .alias("start_date")))
+                       .collect())}
+
     def extract_market_days(self) -> DataFrame:
 
         """
@@ -238,21 +251,37 @@ class PortfolioAnalyzer:
         logger.info("Extracting symbols")
         return [row["symbol"] for row in self.tradebook.select("symbol").distinct().collect()]
     
-    def fetch_earliest_trade_dates(self) -> Dict[str, datetime]:
+    def fetch_corporate_events(self) -> Dict[str, DataFrame]:
 
         """
-        Fetch the earliest trade date for each stock symbol from the tradebook.
+        Fetch corporate events (stock splits and bonus issues) for each stock symbol.
 
         Returns:
-            Dict[str, datetime]: A dictionary mapping each stock symbol to its earliest trade date.
+            Dict[str, DataFrame]: A dictionary mapping stock symbols to their respective corporate events DataFrame.
+
+        Schema:
+            root
+            |-- details: string (nullable = true)
+            |-- ex_date: string (nullable = true)
+            |-- ratio: double (nullable = true)
+            |-- type: string (nullable = true)
+            |-- amount: double (nullable = true)
         """
 
-        logger.info("Fetching the earliest trade date for each stock symbol")
-        return {row["symbol"]: row["start_date"] for row in 
-                ((self.tradebook.groupBy("symbol")
-                  .agg(min("trade_date")
-                       .alias("start_date")))
-                       .collect())}
+        logger.info("Fetching corporate events (stock splits and bonus issues) for each stock symbol")
+        script_codes: Dict[str, str] = get_script_codes(spark=self.spark,
+                                                        jdbc_postgresql_url=get_jdbc_postgresql_url(), 
+                                                        database_properties_securities=get_database_properties_securities(), 
+                                                        tickers=self.symbols, 
+                                                        segment="Equity T+1")
+        return {symbol: x
+                for symbol in self.symbols
+                if (events := get_corporate_events(
+                    scriptcode=script_codes.get(symbol),
+                    start_date=str(self.earliest_trade_dates.get(symbol)),
+                    end_date=datetime.today().strftime('%Y-%m-%d'))) 
+                and 
+                    (x := self.spark.createDataFrame(events).filter("type IN ('split', 'bonus')")).count() > 0}
     
     def get_corporate_events(self) -> Dict[str, DataFrame]:
 
@@ -271,17 +300,9 @@ class PortfolioAnalyzer:
             |-- amount: double (nullable = true)
         """
 
-        logger.info("Fetching corporate events (stock splits and bonus issues) for each stock symbol")
-        script_codes: Dict[str, str] = self.get_script_codes(self.symbols)
-        return {symbol: x
-                for symbol in self.symbols
-                if (events := get_corporate_events(
-                    scriptcode=script_codes.get(symbol),
-                    start_date=str(self.earliest_trade_dates.get(symbol)),
-                    end_date=datetime.today().strftime('%Y-%m-%d'))) 
-                and 
-                    (x := self.spark.createDataFrame(events).filter("type IN ('split', 'bonus')")).count() > 0}
-    
+        logger.info("Getting corporate events for stocks.")
+        return self.corporate_events
+
     def get_dates(self) -> DataFrame:
 
         """
@@ -297,6 +318,18 @@ class PortfolioAnalyzer:
 
         logger.info("Getting dates")
         return self.dates
+    
+    def get_earliest_trade_dates(self) -> Dict[str, datetime]:
+
+        """
+        Get the first recorded trade date for each stock.
+
+        Returns:
+            Dict[str, datetime]: A dictionary mapping stock symbols to their first recorded trade date.
+        """
+
+        logger.info("Getting first recorded trade date for each stock.")
+        return self.earliest_trade_dates
 
     def get_historical_data(self) -> Dict[str, DataFrame]:
 
@@ -328,38 +361,7 @@ class PortfolioAnalyzer:
 
         logger.info("Getting holdings")
         return self.holdings
-    
-    def get_holdings_as_pandas_dataframe(self) -> pandas_DataFrame:
 
-        """
-        Converts Spark DataFrame holdings to a Pandas DataFrame.
-        
-        Returns:
-            pandas_DataFrame: Holdings data in Pandas format.
-
-        Schema:
-            root
-            |-- timestamp: date (nullable = true)
-            |-- *symbol: double (nullable = true)
-
-            *symbol represents all the column for each stock symbol.
-        """
-
-        logger.info("Converting holdings to Pandas DataFrame")
-        return self.holdings.toPandas()
-    
-    def get_jdbc_postgresql_url(self) -> str:
-
-        """
-        Construct the JDBC URL for connecting to the PostgreSQL `portfolioanalyzer` database.
-
-        Returns:
-            str: The JDBC connection URL for PostgreSQL `portfolioanalyzer` database.
-        """
-
-        logger.info("Getting JDBC URL for connecting to portfolioanalyzer database")
-        return f"jdbc:postgresql://{os.environ["POSTGRES_HOST"]}/{os.environ["POSTGRES_PORTFOLIOANALYZER_DATABASE"]}"
-    
     def get_quotes(self) -> DataFrame:
         
         """
@@ -378,86 +380,6 @@ class PortfolioAnalyzer:
 
         logger.info("Getting quotes")
         return self.quotes
-    
-    def get_database_properties_securities(self):
-
-        """
-        Retrieve database connection properties for the `securities` database.
-
-        Returns:
-            Dict[str, str]: A dictionary containing database connection properties including the `username`, `password`, and JDBC `driver`.
-        """
-
-        logger.info("Getting database connection properties for the `securities` database")
-        return {"user": os.environ["POSTGRES_PORTFOLIOANALYZER_USERNAME"],
-                "password": os.environ["POSTGRES_PORTFOLIOANALYZER_PASSWORD"],
-                "driver": "org.postgresql.Driver"}
-    
-    def get_script_codes(self, tickers: List[str], segment: str = "Equity T+1", status: str = "Active") -> Dict[str, Optional[str]]:
-
-        """
-        Fetch the BSE script codes given a list of ticker symbols, from `securities` table in PostgreSQL database.
-
-        Parameters:
-            tickers (List[str]): List of ticker symbols.
-            segment (str): The segment to filter by ('Equity T+1', 'Equity T+0', 'Derivatives', 'Exchange Traded Funds',
-                                                'Debt or Others', 'Currency Derivatives', 'Commodity', 'Electronic Gold Receipts',
-                                                'Hybrid Security', 'Municipal Bonds', 'Preference Shares', 'Debentures and Bonds',
-                                                'Equity - Institutional Series', 'Commercial Papers', 'Social Stock Exchange', default: 'Equity T+1').
-            status (str): The status to filter by ('Active', 'Suspended', 'Delisted', default: Active).
-
-        Returns:
-            Dict[str, Optional[str]]: A dictionary with tickers as keys and script codes as values.
-        """
-
-        VALID_SEGMENTS = {
-            "Equity T+1": "Equity T+1",
-            "Equity T+0": "Equity T+0",
-            "Derivatives": "Derivatives",
-            "Exchange Traded Funds": "Exchange Traded Funds",
-            "Debt or Others": "Debt or Others",
-            "Currency Derivatives": "Currency Derivatives",
-            "Commodity": "Commodity",
-            "Electronic Gold Receipts": "Electronic Gold Receipts",
-            "Hybrid Security": "Hybrid Security",
-            "Municipal Bonds": "Municipal Bonds",
-            "Preference Shares": "Preference Shares",
-            "Debentures and Bonds": "Debentures and Bonds",
-            "Equity - Institutional Series": "Equity - Institutional Series",
-            "Commercial Papers": "Commercial Papers",
-            "Social Stock Exchange": "Social Stock Exchange"
-        }
-
-        VALID_STATUSES = {"Active": "Active", "Suspended": "Suspended", "Delisted": "Delisted"}
-
-        if segment not in VALID_SEGMENTS:
-            logger.warning(f"Invalid segment '{segment}', using 'Equity T+1' as default segment filter.")
-            segment = VALID_SEGMENTS.get(segment, "Equity")
-
-        if status not in VALID_STATUSES:
-            logger.warning(f"Invalid status '{status}', using 'Active' as default status filter.")
-            status = VALID_STATUSES.get(status, "Active")
-
-        query = f"""
-                (SELECT scrip_id, scrip_code
-                FROM securities
-                WHERE segment = '{VALID_SEGMENTS.get(segment)}'
-                AND status = '{VALID_STATUSES.get(status)}'
-                AND scrip_id IN ({','.join([f"'{ticker}'" for ticker in tickers])})) AS securities_filtered
-                """
-        
-        logger.info(f"Getting script codes for {tickers} from the `securities` database")
-        script_codes: DataFrame = self.spark.read.jdbc(url=self.jdbc_postgresql_url, table=query, properties=self.database_properties_securities)
-
-        script_codes: Dict[str, str] = {row['scrip_id']: row['scrip_code'] for row in script_codes.collect()}
-
-        for ticker in tickers:
-            if ticker not in script_codes:
-                logger.warning(f"Ticker '{ticker}' not found in database.")
-                script_codes[ticker] = None
-
-        logger.info(f"Script codes {script_codes} fetched from the `securities` database")
-        return script_codes
     
     def get_symbols(self) -> List[str]:
         
@@ -502,25 +424,6 @@ class PortfolioAnalyzer:
         logger.info("Getting tradebook")
         return self.tradebook
     
-    def get_tradebook_as_pandas_dataframe(self) -> pandas_DataFrame:
-
-        """
-        Converts Spark DataFrame tradebook to a Pandas DataFrame.
-        
-        Returns:
-            pandas_DataFrame: Tradebook data in Pandas format.
-
-        Schema:
-            root
-            |-- trade_date: date (nullable = true)
-            |-- symbol: string (nullable = true)
-            |-- average_price: double (nullable = true)
-            |-- quantity: long (nullable = true)
-        """
-
-        logger.info("Converting tradebook to Pandas DataFrame")
-        return self.tradebook.toPandas()
-    
     def get_trades(self) -> DataFrame:
 
         """
@@ -555,16 +458,37 @@ class PortfolioAnalyzer:
             |-- average_price: double (nullable = true)
             |-- quantity: long (nullable = true)
         """
+        
+        def load_zerodha_tradebook(self) -> DataFrame:
+
+            """
+            Loads the tradebook for Zerodha.
+
+            Returns:
+                DataFrame: A Spark DataFrame containing cleaned trade data.
+            """
+
+            logger.info(f"Loading tradebook, broker: {self.broker}, series: {self.series}")
+            return (self.spark.read.csv(self.tradebook_path, inferSchema=True, header=True)
+                    .drop("isin", "exchange", "segment", "auction", "trade_id", "order_id", "order_execution_time")
+                    .filter(col("series").isin(*self.series))
+                    .withColumn("trade_date", to_date(col("trade_date"), "yyyy-MM-dd"))
+                    .withColumn("quantity", when(col("trade_type") == "buy", col("quantity")).otherwise(-col("quantity")))
+                    .withColumn("weighted_price", col("price") * col("quantity"))
+                    .groupBy("trade_date", "symbol")
+                    .agg((spark_sum("weighted_price") / spark_sum("quantity")).alias("average_price"),
+                        spark_sum("quantity").alias("quantity"))
+                    .drop("weighted_price"))
+        
+        TRADEBOOK_LOADERS: Dict[str, Callable] = {}
+
+        if not TRADEBOOK_LOADERS:
+            TRADEBOOK_LOADERS["Zerodha"] = load_zerodha_tradebook
 
         logger.info("Loading tradebook")
-        if self.broker == "Zerodha":
-            return (self.spark.read.csv(self.tradebook_path, inferSchema=True, header=True)
-                .drop("isin", "exchange", "segment", "series", "auction", "trade_id", "order_id", "order_execution_time")
-                .withColumn("trade_date", to_date(col("trade_date"), "yyyy-MM-dd"))
-                .withColumn("quantity", when(col("trade_type") == "buy", col("quantity")).otherwise(-col("quantity")))
-                .withColumn("weighted_price", col("price") * col("quantity"))
-                .groupBy("trade_date", "symbol")
-                .agg((spark_sum("weighted_price") / spark_sum("quantity")).alias("average_price"),
-                        spark_sum("quantity").alias("quantity"))
-                .filter(col("quantity") != 0)
-                .drop("weighted_price"))
+
+        # Fetch the appropriate tradebook loader
+        loader = TRADEBOOK_LOADERS.get(self.broker)
+        
+        if loader:
+            return loader(self)

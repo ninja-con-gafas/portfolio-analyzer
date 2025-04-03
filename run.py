@@ -1,5 +1,5 @@
 import logging
-from pages.ui_components import set_sidebar
+from config.ui_components import set_sidebar
 from streamlit import switch_page
 
 # Configure logging
