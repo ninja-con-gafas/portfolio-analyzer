@@ -273,16 +273,14 @@ class PortfolioAnalyzer:
 
         logger.info("Fetching corporate events (stock splits and bonus issues) for each stock symbol")
         script_codes: Dict[str, str] = self.get_script_codes(self.symbols)
-        return {
-            symbol: x
-            for symbol in self.symbols
-            if (x := self.spark.createDataFrame(
-                get_corporate_events(
+        return {symbol: x
+                for symbol in self.symbols
+                if (events := get_corporate_events(
                     scriptcode=script_codes.get(symbol),
                     start_date=str(self.earliest_trade_dates.get(symbol)),
-                    end_date=datetime.today().strftime('%Y-%m-%d'))
-                    ).filter("type IN ('split', 'bonus')")
-                    ).count() > 0}
+                    end_date=datetime.today().strftime('%Y-%m-%d'))) 
+                and 
+                    (x := self.spark.createDataFrame(events).filter("type IN ('split', 'bonus')")).count() > 0}
     
     def get_dates(self) -> DataFrame:
 
