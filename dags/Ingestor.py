@@ -150,6 +150,7 @@ def index_securities() -> None:
         # Create indexes on relevant columns
         logger.info("Creating indexes on securities table")
         cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_securities_seg_status_id ON securities(segment, scrip_id, status, scrip_code);
             CREATE INDEX IF NOT EXISTS idx_securities_scrip_code ON securities(scrip_code);
             CREATE INDEX IF NOT EXISTS idx_securities_isin_number ON securities(isin_number);
             CREATE INDEX IF NOT EXISTS idx_securities_scrip_id ON securities(scrip_id);
@@ -305,13 +306,16 @@ def save_securities_to_csv(securities: List[Dict[str, Optional[str]]], segment: 
 
 time_zone: ZoneInfo = ZoneInfo("Asia/Kolkata")
 current_date: datetime = datetime.now(time_zone)
-start_date = datetime(current_date.year, current_date.month, 1, tzinfo=time_zone)
+prev_month = current_date.month - 1 or 12
+prev_year = current_date.year if current_date.month > 1 else current_date.year - 1
+start_date = datetime(prev_year, prev_month, 1, tzinfo=time_zone)
 
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
     "start_date": start_date,
-    "retries": 0
+    "retries": 3,
+    "catchup": True
 }
 
 dag: DAG = DAG("get_securities_from_bse", default_args=default_args, schedule_interval="@monthly", catchup=True)
