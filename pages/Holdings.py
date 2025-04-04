@@ -1,12 +1,13 @@
-import logging
 from altair import Chart, condition, selection_point, value
 from config.ui_components import set_sidebar
+from config.StreamlitLogHandler import run_with_logs
+from logging import basicConfig, getLogger, INFO
 from process.Equity import Equity
 from streamlit import altair_chart, error, session_state, set_page_config, spinner, stop, success, title
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+basicConfig(level=INFO)
+logger = getLogger(__name__)
 
 # Configure the Streamlit page
 set_page_config(page_title="Holdings", layout="wide")
@@ -168,7 +169,7 @@ def main() -> None:
     
     if "holdings_chart" not in session_state or "valuation_chart" not in session_state or "latest_holdings_pie_chart" not in session_state:
         with spinner("🔄 Processing tradebook. Please wait."):
-            get_holdings()
+            run_with_logs(get_holdings)
             success("✅ Holdings data processed successfully!")
             get_melted_holdings()
             get_holdings_chart()
