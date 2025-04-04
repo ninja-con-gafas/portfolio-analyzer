@@ -179,7 +179,7 @@ class Equity:
                 .pivot("symbol")
                 .agg(first("quantity"))
                 .selectExpr("trade_date", 
-                            *[f"`{symbol}` as {symbol}_quantity" for symbol in self.symbols])
+                            *[f"`{symbol}` as `{symbol}_quantity`" for symbol in self.symbols])
                 .join(self.dates, self.dates.timestamp == col("trade_date"), how="outer")
                 .drop("trade_date")
                 .withColumn("timestamp", to_date(col("timestamp")))
