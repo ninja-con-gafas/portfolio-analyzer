@@ -1,0 +1,70 @@
+name: Bug or Feature Report
+description: Report a bug or request a new feature/enhancement
+title: "[bug|enhancement]: <concise summary>"
+labels: []
+assignees: []
+
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      description: What kind of issue are you reporting?
+      options:
+        - Bug
+        - Enhancement
+        - Question
+    validations:
+      required: true
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-line description of the issue
+      placeholder: No historical data available for certain securities.
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Provide all the necessary context, including observed behavior and what you expected instead.
+      placeholder: |
+        - What happened?
+        - What should have happened?
+        - Where does it break?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce (for bugs)
+      description: If applicable, list steps to reproduce the issue.
+      placeholder: |
+        1. Go to...
+        2. Click...
+        3. See error...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: related
+    attributes:
+      label: Related Issues or PRs
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: This issue is not caused by a known external dependency.
+          required: false
+
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed Solution or Insight (Optional)
+      description: If you have ideas or workarounds, add them here.
+      placeholder: Suggestions, fallback APIs, or internal logic improvements.
+    validations:
+      required: false
