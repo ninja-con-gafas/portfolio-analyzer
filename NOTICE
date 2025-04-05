@@ -1,0 +1,28 @@
+Portfolio Analyzer - Copyright 2025 Atharv Darekar
+
+This product includes software developed by Atharv Darekar.
+
+This product includes components licensed under the Apache License, Version 2.0:
+- Apache Airflow (https://airflow.apache.org/)
+- Apache Spark (via pyspark) - https://spark.apache.org/
+- Docker & Docker Compose - https://www.docker.com/
+- Requests - https://docs.python-requests.org/
+- Streamlit - https://streamlit.io/
+
+This product includes software licensed under the BSD 3-Clause License:
+- pandas - https://pandas.pydata.org/
+- Redis - https://redis.io/
+- scipy - https://scipy.org/
+
+This product includes additional open-source components:
+- matplotlib (PSF/BSD) - https://matplotlib.org/
+- PostgreSQL (PostgreSQL License) - https://www.postgresql.org/
+- psycopg2-binary (LGPL 3.0) - https://www.psycopg.org/
+- setuptools (MIT) - https://github.com/pypa/setuptools
+
+This product includes internal code from the repository:
+- finance - developed and maintained by Atharv Darekar
+
+Unless otherwise noted, all third-party libraries are used in accordance with their respective licenses. The full text of the Apache License 2.0 is available in the LICENSE file and online at:
+
+https://www.apache.org/licenses/LICENSE-2.0
