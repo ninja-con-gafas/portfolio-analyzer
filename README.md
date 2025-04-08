@@ -6,7 +6,10 @@ Portfolio Analyzer is a Streamlit-based application designed to help users analy
 
 ## Features
 
-- **Tradebook Upload**: Upload tradebooks in CSV format for supported brokers.
+- **Tradebook Upload**: Upload tradebooks in CSV format for following brokers:
+  - Zerodha
+- **Asset Class**: Supports following asset classes:
+  - Equity (Series: A and EQ)
 - **Corporate Action Adjustments**: Automatically adjusts holdings for stock splits and bonuses.
 - **Historical Data Integration**: Fetches historical stock prices for portfolio symbols.
 - **Interactive Visualizations**:
