@@ -154,7 +154,7 @@ class Equity:
         quotes = self.dates
         for ticker, data in self.historical_data.items():
             logger.info(f"Compiling quotes for {ticker}")
-            quotes = (quotes.join(data.withColumnRenamed("quote", f"{ticker}_quote"), on="timestamp", how="inner")
+            quotes = (quotes.join(data.withColumnRenamed("quote", f"{ticker}_quote"), on="timestamp", how="outer")
                       .drop("symbol"))
         return quotes.withColumn("timestamp", to_date(col("timestamp")))
 
