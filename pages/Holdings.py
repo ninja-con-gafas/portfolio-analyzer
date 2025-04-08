@@ -1,9 +1,11 @@
 from altair import Chart, condition, selection_point, value
 from config.ui_components import set_sidebar
-from config.StreamlitLogHandler import run_with_logs
+from config.StreamlitLogHandler import StreamlitLogHandler
 from logging import basicConfig, getLogger, INFO
 from process.Equity import Equity
-from streamlit import altair_chart, error, session_state, set_page_config, spinner, stop, success, title
+from pyspark.sql import DataFrame
+from pyspark.sql.functions import col, date_trunc, sum as spark_sum
+from streamlit import altair_chart, error, selectbox, session_state, set_page_config, spinner, stop, success, title
 
 # Configure logging
 basicConfig(level=INFO)
@@ -12,6 +14,7 @@ logger = getLogger(__name__)
 # Configure the Streamlit page
 set_page_config(page_title="Holdings", layout="wide")
 
+@StreamlitLogHandler.decorate
 def get_holdings() -> None:
 
     """
@@ -34,8 +37,8 @@ def get_holdings() -> None:
 
     analyzer = Equity(spark=session_state["spark"], broker=session_state["broker"], segment=session_state["segment"],
                       tradebook_path=session_state["tradebook_path"])
-    session_state["tradebook"] = analyzer.get_tradebook().toPandas()
-    session_state["holdings"] = analyzer.get_holdings().toPandas()
+    session_state["tradebook"] = analyzer.get_tradebook()
+    session_state["holdings"] = analyzer.get_holdings()
 
 def get_holdings_chart() -> None:
 
@@ -46,11 +49,6 @@ def get_holdings_chart() -> None:
     - Displays valuation trends over time.
     - Enables tooltip interactivity.
     """
-
-    if "melted_holdings" not in session_state:
-        logger.error("Melted holdings data not found in session state.")
-        error("Chart data unavailable.")
-        stop()
 
     logger.info("Creating holdings chart.")
     selection = selection_point(fields=["Security"], bind="legend")
@@ -73,15 +71,12 @@ def get_latest_holdings_pie_chart() -> None:
     """
     Creates an interactive Altair pie chart to visualize the latest holding pattern.
 
+    - Uses selection filtering for highlighting securities.
     - Displays the share of various securities of the total valuation.
     - Enables tooltip interactivity.
     """
 
-    if "melted_holdings" not in session_state:
-        logger.error("Melted holdings data not found in session state.")
-        error("Chart data unavailable.")
-        stop()
-
+    selection = selection_point(fields=["Security"], bind="legend")
     latest_date = session_state["melted_holdings"]["Date"].max()
     latest_holdings = session_state["melted_holdings"][session_state["melted_holdings"]["Date"] == latest_date]
 
@@ -93,34 +88,51 @@ def get_latest_holdings_pie_chart() -> None:
                                                         width=400,
                                                         height=400,
                                                         title="Latest Holdings Pattern")
-                                                  .mark_arc()
-                                                  .encode(theta="Valuation:Q",
-                                                          color="Security:N",
-                                                          tooltip=["Security", "Valuation", "Percentage"])
-                                                  .interactive())
+                                                        .mark_arc()
+                                                        .encode(theta="Valuation:Q",
+                                                                color="Security:N",
+                                                                tooltip=["Security", "Valuation", "Percentage"],
+                                                                opacity=condition(selection, value(1), value(0.1)))        
+                                                        .add_params(selection)
+                                                        .interactive())
 
 def get_melted_holdings() -> None:
 
     """
-    Transforms holdings data into a long-format DataFrame for visualization.
+    Resamples holdings data using PySpark based on the selected time granularity and transforms holdings data into a 
+    long-format DataFrame for visualization.
 
     - Renames `timestamp` to `Date` and converts it to string.
     - Melts the holdings DataFrame to have columns: Date, Security, Valuation.
-    
+
+    Parameters:
+        None
+
+    Returns:
+        None
+
     Raises:
         Exception: If an error occurs during transformation.
     """
 
+    granularity_map = {
+        "Daily": None,
+        "Weekly": "week",
+        "Monthly": "month",
+        "Yearly": "year"
+    }
+
+    granularity = session_state["granularity"]
+    holdings: DataFrame = session_state["holdings"]
+
     try:
-        if "holdings" not in session_state:
-            logger.error("Holdings data not found in session state.")
-            error("Holdings data not available.")
-            stop()
-        
-        session_state["melted_holdings"] = (session_state["holdings"]
+        session_state["melted_holdings"] = ((holdings.withColumn("timestamp", date_trunc(granularity_map[granularity], col("timestamp")))
+                                            if granularity_map[granularity] is not None else holdings)
+                                            .groupBy("timestamp")
+                                            .agg(*[spark_sum(col(security)).alias(security) for security in holdings.columns if security != "timestamp"])
+                                            .toPandas()
                                             .rename(columns={"timestamp": "Date"})
-                                            .assign(Date=lambda df: df["Date"].astype(str))
-                                            .melt(id_vars=["Date"], var_name="Security", value_name="Valuation"))
+                                            .assign(Date=lambda x: x["Date"].astype(str)).melt(id_vars=["Date"], var_name="Security", value_name="Valuation"))
     except Exception as e:
         logger.error(f"Error transforming holdings data: {e}")
         error(f"An error occurred while processing the tradebook: {e}")
@@ -134,11 +146,6 @@ def get_valuation_chart() -> None:
     - Displays valuation trends over time.
     - Enables tooltip interactivity.
     """
-
-    if "melted_holdings" not in session_state:
-        logger.error("Melted holdings data not found in session state.")
-        error("Chart data unavailable.")
-        stop()
 
     logger.info("Creating valuation chart.")
     session_state["valuation_chart"] = (Chart(session_state["melted_holdings"],
@@ -167,26 +174,24 @@ def main() -> None:
     set_sidebar()
     logger.info("Holdings page loaded.")
     
-    if "holdings_chart" not in session_state or "valuation_chart" not in session_state or "latest_holdings_pie_chart" not in session_state:
+    if "holdings" not in session_state:
         with spinner("🔄 Processing tradebook. Please wait."):
-            run_with_logs(get_holdings)
+            get_holdings()
             success("✅ Holdings data processed successfully!")
-            get_melted_holdings()
-            get_holdings_chart()
-            get_valuation_chart()
-            get_latest_holdings_pie_chart()
-    
-    logger.info("Displaying holdings chart.")
+
+    session_state["granularity"] = selectbox("Select Time Granularity", ["Daily", "Weekly", "Monthly", "Yearly"], index=0)
+
+    with spinner(f"🔁 Generating charts for {session_state["granularity"]} granularity..."):
+        get_melted_holdings()
+        get_holdings_chart()
+        get_valuation_chart()
+        get_latest_holdings_pie_chart()
+        logger.info("Charts data generated successfully.")
+        success(f"✅ Charts updated to {session_state["granularity"]} view!")
+
     altair_chart(session_state["holdings_chart"], use_container_width=True)
-    logger.info("Holdings chart displayed successfully.")
-
-    logger.info("Displaying valuation chart.")
     altair_chart(session_state["valuation_chart"], use_container_width=True)
-    logger.info("Valuation chart displayed successfully.")
-
-    logger.info("Displaying latest holdings pie chart.")
     altair_chart(session_state["latest_holdings_pie_chart"], use_container_width=True)
-    logger.info("Latest holdings pie chart displayed successfully.")
 
 if __name__ == "__main__":
     main()

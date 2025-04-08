@@ -18,6 +18,37 @@ class StreamlitLogHandler(Handler):
         self.placeholder = placeholder
         self.log_lines = []
 
+    @staticmethod
+    def decorate(func: Callable[..., Any]) -> Callable[..., Any]:
+
+        """
+        Function decorator that injects StreamlitLogHandler to stream logs in real time.
+
+        Parameters:
+            func (Callable[..., Any]): Target function to wrap.
+
+        Returns:
+            Callable[..., Any]: The wrapped function with logging streamed to the Streamlit UI.
+        """
+        
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            log_placeholder = empty()
+            handler = StreamlitLogHandler(log_placeholder)
+            formatter = Formatter("%(asctime)s | %(levelname)s | %(message)s", "%H:%M:%S")
+            handler.setFormatter(formatter)
+
+            root_logger = getLogger()
+            root_logger.addHandler(handler)
+
+            try:
+                return func(*args, **kwargs)
+            finally:
+                root_logger.removeHandler(handler)
+                handler.flush()
+                log_placeholder.empty()
+
+        return wrapped
+
     def emit(self, record: LogRecord) -> None:
         
         """
@@ -71,34 +102,3 @@ class StreamlitLogHandler(Handler):
         """
 
         self.log_lines.clear()
-
-def run_with_logs(func: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
-    
-    """
-    Description:
-        Executes a given function with optional arguments and streams real-time logs to the UI
-        using a custom StreamlitLogHandler. Logs are auto-removed after completion.
-
-    Parameters:
-        func (Callable[..., Any]): The function to execute.
-        *args (Any): Positional arguments for the function.
-        **kwargs (Any): Keyword arguments for the function.
-
-    Returns:
-        None
-    """
-
-    log_placeholder = empty()
-    handler = StreamlitLogHandler(log_placeholder)
-    formatter = Formatter("%(asctime)s | %(levelname)s | %(message)s", "%H:%M:%S")
-    handler.setFormatter(formatter)
-
-    root_logger = getLogger()
-    root_logger.addHandler(handler)
-
-    try:
-        func(*args, **kwargs)
-    finally:
-        root_logger.removeHandler(handler)
-        handler.flush()
-        log_placeholder.empty()
