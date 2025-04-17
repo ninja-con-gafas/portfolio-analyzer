@@ -1,0 +1,22 @@
+flowchart TD
+
+%% User Interaction Flow
+subgraph User_Interaction_Flow
+    direction TB
+    A1([User uploads tradebook via Streamlit]) --> A2([Temporarily store uploaded file])
+    A2 --> A3([Initialize Apache Spark session])
+    A3 --> A4([Transform data using PySpark<br/>- Query PostgreSQL<br/>- Use finance lib])
+    A4 --> A5([Compute financial metrics<br/>- Use historical data])
+    A5 --> A6([Visualize data with Altair in Streamlit])
+end
+
+%% Airflow-Orchestrated Flow
+subgraph Airflow_Orchestrated_Flow
+    direction TB
+    B1([Airflow DAG: get_securities_from_bse.py - scheduled monthly]) --> B2([Fetch data from BSE API via finance lib])
+    B2 --> B3([Store data as CSV files])
+    B3 --> B4([Ingest CSVs into PostgreSQL with indexes])
+end
+
+%% Data Dependency Arrow
+B4 --> A4
